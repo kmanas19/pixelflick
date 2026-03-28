@@ -248,4 +248,369 @@
       </div>
       <canvas id="movie-canvas" style="display:none"></canvas>
       <div class="reveal-overlay" id="reveal-overlay">
-        <div class="reveal-title" id="r
+        <div class="reveal-title" id="reveal-title">🎉 Correct!</div>
+        <div class="reveal-sub" id="reveal-sub"></div>
+      </div>
+    </div>
+
+    <div class="clues-section" id="clues-section" style="display:none">
+      <div class="clues-label">clues revealed</div>
+      <div class="clues-list" id="clues-list"></div>
+    </div>
+
+    <div id="wrong-section" style="display:none">
+      <div class="clues-label" style="margin-bottom:0.5rem">wrong guesses</div>
+      <div class="wrong-list" id="wrong-list"></div>
+    </div>
+
+    <div class="guess-form" id="guess-form">
+      <input id="guess-input" class="guess-input" type="text" placeholder="Type movie title..." autocomplete="off" />
+      <button class="guess-btn" id="guess-btn" onclick="submitGuess()">Guess →</button>
+    </div>
+
+    <div class="checking-msg" id="checking-msg"></div>
+    <button class="next-btn hidden" id="next-btn" onclick="nextMovie()">Next Movie →</button>
+  </div>
+</main>
+
+<script>
+const MAX_ATTEMPTS = 5;
+const PIXEL_LEVELS = [64, 48, 32, 20, 12, 4];
+
+let state = {
+  score: 0,
+  currentMovie: null,
+  clues: [],
+  wrongGuesses: [],
+  attemptsLeft: MAX_ATTEMPTS,
+  gameOver: false,
+  originalImageData: null,
+};
+
+async function callClaude(prompt, systemPrompt) {
+  const res = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system: systemPrompt || "",
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error("API error: " + res.status + " " + txt.slice(0, 100));
+  }
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  return data.content?.[0]?.text || "";
+}
+
+async function fetchMovieData() {
+  const prompt = `Pick a well-known movie (varied genres: blockbuster, classic, recent). Respond ONLY with valid JSON, no markdown:
+{
+  "title": "exact movie title",
+  "year": 2010,
+  "genre": "genre",
+  "clues": ["clue1 (subtle)", "clue2 (medium)", "clue3 (obvious)", "clue4 (very obvious)", "clue5 (giveaway)"],
+  "posterDescription": "vivid 2-sentence description of the poster"
+}
+Make clues progressively more revealing. No spoilers in early clues. Vary genres each time.`;
+
+  const raw = await callClaude(prompt, "You are a movie expert. Return only valid JSON, no markdown, no backticks.");
+  const clean = raw.replace(/```json|```/g, "").trim();
+  return JSON.parse(clean);
+}
+
+async function validateGuess(guess, movieTitle) {
+  const prompt = `The correct movie is "${movieTitle}". The user guessed "${guess}". Is this correct? Consider alternate spellings, partial titles, abbreviations. Reply ONLY with JSON: {"correct": true/false, "feedback": "short 1-sentence response"}`;
+  const raw = await callClaude(prompt, "You are a strict but fair movie title judge. Return only valid JSON.");
+  const clean = raw.replace(/```json|```/g, "").trim();
+  return JSON.parse(clean);
+}
+
+function drawPixelated(imageData, pixelSize) {
+  const canvas = document.getElementById("movie-canvas");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+
+  const tmp = document.createElement("canvas");
+  tmp.width = W; tmp.height = H;
+  tmp.getContext("2d").putImageData(imageData, 0, 0);
+
+  const smallW = Math.max(1, Math.ceil(W / pixelSize));
+  const smallH = Math.max(1, Math.ceil(H / pixelSize));
+
+  const px = document.createElement("canvas");
+  px.width = smallW; px.height = smallH;
+  const pCtx = px.getContext("2d");
+  pCtx.imageSmoothingEnabled = false;
+  pCtx.drawImage(tmp, 0, 0, smallW, smallH);
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(px, 0, 0, W, H);
+}
+
+function generatePosterCanvas(movie) {
+  const canvas = document.getElementById("movie-canvas");
+  const W = 400, H = 600;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  const palettes = {
+    action:    { bg: ["#1a0a02","#3d1a06"], accent: "#ff6b35" },
+    horror:    { bg: ["#0a0005","#1a001a"], accent: "#cc0033" },
+    comedy:    { bg: ["#fff7e6","#ffe0b2"], accent: "#ff9800" },
+    romance:   { bg: ["#1a0010","#3d0030"], accent: "#ff4d6d" },
+    scifi:     { bg: ["#000814","#001d3d"], accent: "#00b4d8" },
+    drama:     { bg: ["#0d0d0d","#1a1a2e"], accent: "#e2b96f" },
+    thriller:  { bg: ["#050505","#111111"], accent: "#ffd000" },
+    animation: { bg: ["#e8f4f8","#b3d9f0"], accent: "#ff6b9d" },
+    fantasy:   { bg: ["#0a0a1a","#1a1040"], accent: "#c77dff" },
+    default:   { bg: ["#111118","#1e1e2e"], accent: "#e8ff47" },
+  };
+
+  const genre = (movie.genre || "").toLowerCase();
+  const palKey = Object.keys(palettes).find(k => genre.includes(k)) || "default";
+  const pal = palettes[palKey];
+
+  const grd = ctx.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, pal.bg[0]);
+  grd.addColorStop(1, pal.bg[1]);
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  const hexToRgba = (hex, a) => {
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${a})`;
+  };
+
+  ctx.globalAlpha = 0.18;
+  for (let i = 0; i < 4; i++) {
+    const x = (Math.sin(i * 2.3 + movie.title.length) * 0.4 + 0.5) * W;
+    const y = (Math.cos(i * 1.7 + movie.year) * 0.3 + 0.4) * H;
+    const r = 60 + (i * 40);
+    const cg = ctx.createRadialGradient(x, y, 0, x, y, r);
+    cg.addColorStop(0, pal.accent);
+    cg.addColorStop(1, "transparent");
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  const shapeIdx = movie.title.length % 3;
+  if (shapeIdx === 0) {
+    ctx.fillStyle = hexToRgba(pal.accent, 0.22);
+    ctx.beginPath();
+    ctx.ellipse(W/2, H*0.37, 58, 72, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = hexToRgba(pal.accent, 0.13);
+    ctx.fillRect(W/2-32, H*0.46, 64, 130);
+  } else if (shapeIdx === 1) {
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = hexToRgba(pal.accent, 0.06 + i * 0.025);
+      ctx.fillRect(W*0.1, H*(0.18 + i*0.055), W*0.8, 3 + i*1.8);
+    }
+  } else {
+    ctx.fillStyle = hexToRgba(pal.accent, 0.18);
+    ctx.beginPath();
+    ctx.moveTo(W*0.1, H*0.62);
+    ctx.lineTo(W*0.9, H*0.62);
+    ctx.lineTo(W*0.5, H*0.14);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.textAlign = "center";
+  const titleWords = movie.title.toUpperCase().split(" ");
+  const bigFontSize = titleWords.length <= 2 ? 52 : 36;
+  ctx.font = `900 ${bigFontSize}px 'Arial Black', sans-serif`;
+  ctx.fillStyle = hexToRgba("#ffffff", 0.92);
+
+  const lineH = bigFontSize + 10;
+  const startY = H * 0.72;
+  if (titleWords.length <= 3) {
+    ctx.fillText(movie.title.toUpperCase(), W/2, startY);
+  } else {
+    const mid = Math.ceil(titleWords.length / 2);
+    ctx.fillText(titleWords.slice(0, mid).join(" "), W/2, startY);
+    ctx.fillText(titleWords.slice(mid).join(" "), W/2, startY + lineH);
+  }
+
+  ctx.font = "500 15px Arial, sans-serif";
+  ctx.fillStyle = hexToRgba(pal.accent, 0.9);
+  ctx.fillText(`${movie.year}  ·  ${(movie.genre || "FILM").toUpperCase()}`, W/2, H - 28);
+
+  ctx.strokeStyle = pal.accent;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.moveTo(W*0.2, H*0.665);
+  ctx.lineTo(W*0.8, H*0.665);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  return ctx.getImageData(0, 0, W, H);
+}
+
+async function startGame() {
+  document.getElementById("start-screen").classList.add("hidden");
+  document.getElementById("game-screen").classList.remove("hidden");
+  await loadNewMovie();
+}
+
+async function loadNewMovie() {
+  state.currentMovie = null;
+  state.clues = [];
+  state.wrongGuesses = [];
+  state.attemptsLeft = MAX_ATTEMPTS;
+  state.gameOver = false;
+  state.originalImageData = null;
+
+  setLoading(true);
+  document.getElementById("movie-canvas").style.display = "none";
+  document.getElementById("reveal-overlay").classList.remove("show");
+  document.getElementById("clues-section").style.display = "none";
+  document.getElementById("wrong-section").style.display = "none";
+  document.getElementById("clues-list").innerHTML = "";
+  document.getElementById("wrong-list").innerHTML = "";
+  document.getElementById("guess-form").style.display = "flex";
+  document.getElementById("next-btn").classList.add("hidden");
+  document.getElementById("guess-input").value = "";
+  document.getElementById("guess-input").disabled = false;
+  document.getElementById("guess-btn").disabled = false;
+  document.getElementById("checking-msg").textContent = "";
+  document.getElementById("checking-msg").className = "checking-msg";
+  updatePixelBar(MAX_ATTEMPTS);
+
+  try {
+    const movieData = await fetchMovieData();
+    state.currentMovie = movieData;
+    state.originalImageData = generatePosterCanvas(movieData);
+    drawPixelated(state.originalImageData, PIXEL_LEVELS[0]);
+    setLoading(false);
+    document.getElementById("movie-canvas").style.display = "block";
+    document.getElementById("guess-input").onkeydown = e => {
+      if (e.key === "Enter") submitGuess();
+    };
+  } catch(e) {
+    console.error(e);
+    document.getElementById("loading-shimmer").innerHTML =
+      `<div style="color:var(--accent2);font-family:var(--font-mono);font-size:0.85rem;padding:1.5rem;text-align:center">
+        ⚠ ${e.message}<br><br>
+        <button onclick="loadNewMovie()" style="background:var(--accent);color:#0a0a0f;border:none;padding:0.5rem 1.2rem;border-radius:8px;font-weight:700;cursor:pointer">
+          Retry
+        </button>
+      </div>`;
+  }
+}
+
+async function submitGuess() {
+  const input = document.getElementById("guess-input");
+  const guess = input.value.trim();
+  if (!guess || state.gameOver) return;
+
+  document.getElementById("guess-btn").disabled = true;
+  document.getElementById("guess-input").disabled = true;
+  setStatusMsg("checking...", "");
+
+  try {
+    const result = await validateGuess(guess, state.currentMovie.title);
+
+    if (result.correct) {
+      state.gameOver = true;
+      const points = Math.max(1, state.attemptsLeft + 1);
+      state.score += points;
+      document.getElementById("score-display").textContent = state.score;
+      showReveal(true, state.currentMovie.title, `+${points} points · ${state.attemptsLeft + 1} attempts remaining`);
+      drawPixelated(state.originalImageData, 1);
+      setStatusMsg(`🎉 ${result.feedback}`, "correct");
+      endRound();
+    } else {
+      state.wrongGuesses.push(guess);
+      state.attemptsLeft--;
+      addWrongChip(guess);
+      setStatusMsg(`✗ ${result.feedback}`, "wrong");
+
+      if (state.attemptsLeft <= 0) {
+        state.gameOver = true;
+        showReveal(false, state.currentMovie.title, "Better luck next round!");
+        drawPixelated(state.originalImageData, 1);
+        endRound();
+      } else {
+        updatePixelBar(state.attemptsLeft);
+        const wrongCount = MAX_ATTEMPTS - state.attemptsLeft;
+        drawPixelated(state.originalImageData, PIXEL_LEVELS[wrongCount]);
+        revealClue(wrongCount - 1);
+        document.getElementById("guess-btn").disabled = false;
+        document.getElementById("guess-input").disabled = false;
+        input.value = "";
+        input.focus();
+      }
+    }
+  } catch(e) {
+    setStatusMsg("⚠ Error checking guess. Try again.", "wrong");
+    document.getElementById("guess-btn").disabled = false;
+    document.getElementById("guess-input").disabled = false;
+  }
+}
+
+function revealClue(index) {
+  if (!state.currentMovie?.clues?.[index]) return;
+  const clue = state.currentMovie.clues[index];
+  document.getElementById("clues-section").style.display = "block";
+  const chip = document.createElement("div");
+  chip.className = "clue-chip";
+  chip.textContent = clue;
+  document.getElementById("clues-list").appendChild(chip);
+}
+
+function addWrongChip(guess) {
+  document.getElementById("wrong-section").style.display = "block";
+  const chip = document.createElement("div");
+  chip.className = "wrong-chip";
+  chip.textContent = guess;
+  document.getElementById("wrong-list").appendChild(chip);
+}
+
+function showReveal(won, title, sub) {
+  document.getElementById("reveal-title").textContent = won ? `🎉 ${title}` : `🎬 ${title}`;
+  document.getElementById("reveal-title").className = "reveal-title " + (won ? "win" : "lose");
+  document.getElementById("reveal-sub").textContent = sub;
+  document.getElementById("reveal-overlay").classList.add("show");
+}
+
+function endRound() {
+  document.getElementById("guess-form").style.display = "none";
+  document.getElementById("next-btn").classList.remove("hidden");
+}
+
+function nextMovie() { loadNewMovie(); }
+
+function updatePixelBar(attemptsLeft) {
+  const pct = (attemptsLeft / MAX_ATTEMPTS) * 100;
+  const fill = document.getElementById("pixel-bar-fill");
+  fill.style.width = pct + "%";
+  fill.className = "pixel-bar-fill" + (attemptsLeft <= 2 ? " danger" : "");
+  document.getElementById("attempts-left").textContent = `${attemptsLeft} left`;
+}
+
+function setLoading(on) {
+  const shimmer = document.getElementById("loading-shimmer");
+  shimmer.style.display = on ? "flex" : "none";
+  shimmer.innerHTML = '<div class="loading-icon">🎬</div><div class="loading-text">fetching movie...</div>';
+  if (on) document.getElementById("movie-canvas").style.display = "none";
+}
+
+function setStatusMsg(msg, type) {
+  const el = document.getElementById("checking-msg");
+  el.textContent = msg;
+  el.className = "checking-msg " + (type || "");
+}
+</script>
+</body>
+</html>
