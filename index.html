@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PixelFlick — Movie Guessing Game</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1c1c27;
+    --border: rgba(255,255,255,0.08);
+    --accent: #e8ff47;
+    --accent2: #ff4d6d;
+    --text: #f0f0f0;
+    --muted: #888;
+    --font-display: 'Syne', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-display);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  header {
+    width: 100%;
+    max-width: 900px;
+    padding: 2rem 2rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  .logo span { color: var(--accent); }
+
+  .score-badge {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 0.4rem 1rem;
+    border-radius: 99px;
+    letter-spacing: 0.05em;
+  }
+  .score-badge b { color: var(--accent); }
+
+  main {
+    width: 100%;
+    max-width: 900px;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  /* Pixel level bar */
+  .pixel-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .pixel-label {
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    color: var(--muted);
+    min-width: 80px;
+  }
+  .pixel-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--surface2);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .pixel-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 99px;
+    transition: width 0.6s cubic-bezier(.4,0,.2,1);
+  }
+  .pixel-bar-fill.danger { background: var(--accent2); }
+  .attempts-left {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    min-width: 70px;
+    text-align: right;
+  }
+
+  /* Image area */
+  .image-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 2/3;
+    max-height: 520px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  canvas#movie-canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    transition: filter 0.3s;
+  }
+
+  .reveal-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10,10,15,0.85);
+    backdrop-filter: blur(4px);
+    gap: 1rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .reveal-overlay.show { opacity: 1; pointer-events: all; }
+  .reveal-title { font-size: 2rem; font-weight: 800; text-align: center; padding: 0 1rem; }
+  .reveal-title.win { color: var(--accent); }
+  .reveal-title.lose { color: var(--accent2); }
+  .reveal-sub { color: var(--muted); font-size: 0.9rem; font-family: var(--font-mono); text-align: center; }
+
+  .loading-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+  .loading-text { color: var(--muted); font-size: 0.8rem; font-family: var(--font-mono); }
+  .loading-icon { font-size: 2rem; }
+
+  /* Clues */
+  .clues-section {}
+  .clues-label { font-size: 0.7rem; font-family: var(--font-mono); color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 0.75rem; }
+  .clues-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .clue-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.82rem;
+    font-family: var(--font-mono);
+    color: var(--text);
+    animation: fadeUp 0.3s ease both;
+  }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+
+  /* Wrong guesses */
+  .wrong-list { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .wrong-chip {
+    background: rgba(255,77,109,0.12);
+    border: 1px solid rgba(255,77,109,0.3);
+    border-radius: 99px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    color: var(--accent2);
+    animation: shake 0.4s ease;
+  }
+  @keyframes shake {
+    0%,100%{transform:translateX(0)} 20%{transform:translateX(-4px)} 40%{transform:translateX(4px)} 60%{transform:translateX(-3px)} 80%{transform:translateX(3px)}
+  }
+
+  /* Input area */
+  .guess-form {
+    display: flex;
+    gap: 0.75rem;
+  }
+  .guess-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.85rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .guess-input:focus { border-color: var(--accent); }
+  .guess-input::placeholder { color: var(--muted); }
+  .guess-input:disabled { opacity: 0.4; }
+
+  .guess-btn {
+    background: var(--accent);
+    color: #0a0a0f;
+    border: none;
+    border-radius: 12px;
+    padding: 0.85rem 1.75rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .guess-btn:hover { opacity: 0.88; }
+  .guess-btn:active { transform: scale(0.97); }
+  .guess-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .next-btn {
+    width: 100%;
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.9rem;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    letter-spacing: 0.02em;
+  }
+  .next-btn:hover { background: var(--surface); }
+
+  .checking-msg {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--muted);
+    text-align: center;
+    padding: 0.5rem;
+    min-height: 1.5rem;
+  }
+  .checking-msg.correct { color: var(--accent); }
+  .checking-msg.wrong { color: var(--accent2); }
+
+  /* Start screen */
+  .start-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 3rem 0;
+    text-align: center;
+  }
+  .start-screen h2 { font-size: 3rem; font-weight: 800; line-height: 1.1; }
+  .start-screen h2 em { color: var(--accent); font-style: normal; }
+  .start-screen p { color: var(--muted); font-size: 1rem; max-width: 380px; line-height: 1.6; }
+  .start-btn {
+    background: var(--accent);
+    color: #0a0a0f;
+    border: none;
+    border-radius: 12px;
+    padding: 1rem 2.5rem;
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+    letter-spacing: 0.02em;
+  }
+  .start-btn:hover { opacity: 0.88; }
+  .start-btn:active { transform: scale(0.97); }
+
+  .rules-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    width: 100%;
+    max-width: 500px;
+  }
+  .rule-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .rule-icon { font-size: 1.3rem; }
+  .rule-text { font-size: 0.78rem; color: var(--muted); font-family: var(--font-mono); line-height: 1.4; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Pixel<span>Flick</span></div>
+  <div class="score-badge">score: <b id="score-display">0</b></div>
+</header>
+
+<main>
+
+  <!-- Start Screen -->
+  <div class="start-screen" id="start-screen">
+    <h2>Can you guess the <em>movie</em>?</h2>
+    <p>Pixelated posters reveal themselves with each wrong guess. How few clues do you need?</p>
+    <div class="rules-grid">
+      <div class="rule-card">
+        <div class="rule-icon">🎯</div>
+        <div class="rule-text">Guess the movie from a pixelated image</div>
+      </div>
+      <div class="rule-card">
+        <div class="rule-icon">👁️</div>
+        <div class="rule-text">Wrong guesses reduce pixelation</div>
+      </div>
+      <div class="rule-card">
+        <div class="rule-icon">⭐</div>
+        <div class="rule-text">Fewer clues = more points</div>
+      </div>
+    </div>
+    <button class="start-btn" onclick="startGame()">Start Playing</button>
+  </div>
+
+  <!-- Game Screen -->
+  <div id="game-screen" class="hidden">
+
+    <div class="pixel-bar-wrap">
+      <span class="pixel-label" id="pixel-label">pixelation</span>
+      <div class="pixel-bar"><div class="pixel-bar-fill" id="pixel-bar-fill" style="width:100%"></div></div>
+      <span class="attempts-left" id="attempts-left">5 left</span>
+    </div>
+
+    <div class="image-stage">
+      <div class="loading-shimmer" id="loading-shimmer">
+        <div class="loading-icon">🎬</div>
+        <div class="loading-text">fetching movie...</div>
+      </div>
+      <canvas id="movie-canvas" style="display:none"></canvas>
+      <div class="reveal-overlay" id="reveal-overlay">
+        <div class="reveal-title" id="reveal-title">🎉 Correct!</div>
+        <div class="reveal-sub" id="reveal-sub"></div>
+      </div>
+    </div>
+
+    <div class="clues-section" id="clues-section" style="display:none">
+      <div class="clues-label">clues revealed</div>
+      <div class="clues-list" id="clues-list"></div>
+    </div>
+
+    <div id="wrong-section" style="display:none">
+      <div class="clues-label" style="margin-bottom:0.5rem">wrong guesses</div>
+      <div class="wrong-list" id="wrong-list"></div>
+    </div>
+
+    <div class="guess-form" id="guess-form">
+      <input id="guess-input" class="guess-input" type="text" placeholder="Type movie title..." autocomplete="off" />
+      <button class="guess-btn" id="guess-btn" onclick="submitGuess()">Guess →</button>
+    </div>
+
+    <div class="checking-msg" id="checking-msg"></div>
+
+    <button class="next-btn hidden" id="next-btn" onclick="nextMovie()">Next Movie →</button>
+  </div>
+
+</main>
+
+<script>
+const MAX_ATTEMPTS = 5;
+const PIXEL_LEVELS = [64, 48, 32, 20, 12, 4]; // px block sizes per attempt (0..5 wrong)
+
+let state = {
+  score: 0,
+  currentMovie: null,
+  clues: [],
+  wrongGuesses: [],
+  attemptsLeft: MAX_ATTEMPTS,
+  gameOver: false,
+  imageData: null,
+  originalImageData: null,
+};
+
+// --- API helpers ---
+
+async function callClaude(prompt, systemPrompt) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system: systemPrompt || "",
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const data = await res.json();
+  return data.content?.[0]?.text || "";
+}
+
+// Pick a movie and get poster description + clues
+async function fetchMovieData() {
+  const prompt = `Pick a well-known movie (varied genres: blockbuster, classic, recent). Respond ONLY with valid JSON, no markdown:
+{
+  "title": "exact movie title",
+  "year": 2010,
+  "genre": "genre",
+  "clues": ["clue1 (subtle)", "clue2 (medium)", "clue3 (obvious)", "clue4 (very obvious)", "clue5 (giveaway)"],
+  "posterDescription": "a vivid 2-sentence description of the movie poster's visual appearance: colors, imagery, typography style, key visual elements"
+}
+
+Make clues progressively more revealing. No spoilers in early clues. Vary movie choices.`;
+
+  const raw = await callClaude(prompt, "You are a movie expert. Return only valid JSON.");
+  try {
+    const clean = raw.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
+  } catch(e) {
+    console.error("Parse error", e, raw);
+    return null;
+  }
+}
+
+// Validate a guess using Claude
+async function validateGuess(guess, movieTitle) {
+  const prompt = `The correct movie is "${movieTitle}". The user guessed "${guess}". Is this correct? Consider alternate spellings, partial titles, and common abbreviations. Reply ONLY with JSON: {"correct": true/false, "feedback": "short 1-sentence response"}`;
+  const raw = await callClaude(prompt, "You are a strict but fair movie title judge. Return only valid JSON.");
+  try {
+    const clean = raw.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
+  } catch(e) {
+    return { correct: false, feedback: "Hmm, not quite right." };
+  }
+}
+
+// --- Canvas pixelation ---
+
+function drawPixelated(imageData, pixelSize) {
+  const canvas = document.getElementById("movie-canvas");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // Draw original first to temp canvas
+  const tmp = document.createElement("canvas");
+  tmp.width = W; tmp.height = H;
+  const tCtx = tmp.getContext("2d");
+  tCtx.putImageData(imageData, 0, 0);
+
+  // Scale down then up to pixelate
+  const smallW = Math.ceil(W / pixelSize);
+  const smallH = Math.ceil(H / pixelSize);
+
+  const px = document.createElement("canvas");
+  px.width = smallW; px.height = smallH;
+  const pCtx = px.getContext("2d");
+  pCtx.imageSmoothingEnabled = false;
+  pCtx.drawImage(tmp, 0, 0, smallW, smallH);
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(px, 0, 0, W, H);
+}
+
+// Generate a poster-like image procedurally from description using color palette
+function generatePosterCanvas(movie) {
+  const canvas = document.getElementById("movie-canvas");
+  const W = 400; const H = 600;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  // Genre → color palettes
+  const palettes = {
+    action:   { bg: ["#1a0a02","#3d1a06"], accent: "#ff6b35", text: "#fff" },
+    horror:   { bg: ["#0a0005","#1a001a"], accent: "#cc0033", text: "#ddd" },
+    comedy:   { bg: ["#fff7e6","#ffe0b2"], accent: "#ff9800", text: "#222" },
+    romance:  { bg: ["#1a0010","#3d0030"], accent: "#ff4d6d", text: "#fff" },
+    scifi:    { bg: ["#000814","#001d3d"], accent: "#00b4d8", text: "#caf0f8" },
+    drama:    { bg: ["#0d0d0d","#1a1a2e"], accent: "#e2b96f", text: "#f0e6d3" },
+    thriller: { bg: ["#050505","#111111"], accent: "#ffd000", text: "#ddd" },
+    animation:{ bg: ["#e8f4f8","#b3d9f0"], accent: "#ff6b9d", text: "#222" },
+    fantasy:  { bg: ["#0a0a1a","#1a1040"], accent: "#c77dff", text: "#e0aaff" },
+    default:  { bg: ["#111118","#1e1e2e"], accent: "#e8ff47", text: "#f0f0f0" },
+  };
+
+  const genre = (movie.genre || "").toLowerCase();
+  const pal = Object.keys(palettes).find(k => genre.includes(k))
+    ? palettes[Object.keys(palettes).find(k => genre.includes(k))]
+    : palettes.default;
+
+  // Background gradient
+  const grd = ctx.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, pal.bg[0]);
+  grd.addColorStop(1, pal.bg[1]);
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, W, H);
+
+  // Atmospheric circles
+  ctx.globalAlpha = 0.18;
+  for (let i = 0; i < 4; i++) {
+    const x = Math.random() * W;
+    const y = Math.random() * H * 0.7;
+    const r = 60 + Math.random() * 120;
+    const cg = ctx.createRadialGradient(x,y,0,x,y,r);
+    cg.addColorStop(0, pal.accent);
+    cg.addColorStop(1, "transparent");
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Center silhouette block (represents figure/scene)
+  const shapes = [
+    () => {
+      // Figure silhouette
+      ctx.fillStyle = adjustAlpha(pal.accent, 0.25);
+      ctx.beginPath();
+      ctx.ellipse(W/2, H*0.38, 55, 70, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = adjustAlpha(pal.accent, 0.15);
+      ctx.fillRect(W/2-30, H*0.45, 60, 130);
+    },
+    () => {
+      // Horizontal lines (cinematic)
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = adjustAlpha(pal.accent, 0.08 + i*0.02);
+        ctx.fillRect(W*0.1, H*(0.2 + i*0.05), W*0.8, 3 + i*1.5);
+      }
+    },
+    () => {
+      // Large shape
+      ctx.fillStyle = adjustAlpha(pal.accent, 0.2);
+      ctx.beginPath();
+      ctx.moveTo(W*0.1, H*0.6);
+      ctx.lineTo(W*0.9, H*0.6);
+      ctx.lineTo(W*0.5, H*0.15);
+      ctx.closePath();
+      ctx.fill();
+    }
+  ];
+
+  shapes[movie.title.length % shapes.length]();
+
+  // Title text block (blurred/styled)
+  ctx.fillStyle = adjustAlpha(pal.text, 0.9);
+  ctx.textAlign = "center";
+
+  const titleWords = movie.title.toUpperCase().split(" ");
+  const bigFontSize = titleWords.length <= 2 ? 52 : 38;
+  ctx.font = `900 ${bigFontSize}px 'Arial Black', sans-serif`;
+  ctx.letterSpacing = "4px";
+
+  // Multi-line title
+  const lineH = bigFontSize + 8;
+  const startY = H * 0.72;
+  if (titleWords.length <= 3) {
+    ctx.fillText(movie.title.toUpperCase(), W/2, startY);
+  } else {
+    const mid = Math.ceil(titleWords.length / 2);
+    ctx.fillText(titleWords.slice(0, mid).join(" "), W/2, startY);
+    ctx.fillText(titleWords.slice(mid).join(" "), W/2, startY + lineH);
+  }
+
+  // Year + genre
+  ctx.font = "500 16px 'Arial', sans-serif";
+  ctx.fillStyle = adjustAlpha(pal.accent, 0.85);
+  ctx.fillText(`${movie.year}  ·  ${(movie.genre || "FILM").toUpperCase()}`, W/2, H - 30);
+
+  // Decorative line
+  ctx.strokeStyle = pal.accent;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(W*0.2, H*0.67);
+  ctx.lineTo(W*0.8, H*0.67);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  return ctx.getImageData(0, 0, W, H);
+}
+
+function adjustAlpha(hex, alpha) {
+  // Parse hex to rgba
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// --- Game logic ---
+
+async function startGame() {
+  document.getElementById("start-screen").classList.add("hidden");
+  document.getElementById("game-screen").classList.remove("hidden");
+  await loadNewMovie();
+}
+
+async function loadNewMovie() {
+  // Reset state
+  state.currentMovie = null;
+  state.clues = [];
+  state.wrongGuesses = [];
+  state.attemptsLeft = MAX_ATTEMPTS;
+  state.gameOver = false;
+
+  // UI reset
+  setLoading(true);
+  document.getElementById("movie-canvas").style.display = "none";
+  document.getElementById("reveal-overlay").classList.remove("show");
+  document.getElementById("clues-section").style.display = "none";
+  document.getElementById("wrong-section").style.display = "none";
+  document.getElementById("clues-list").innerHTML = "";
+  document.getElementById("wrong-list").innerHTML = "";
+  document.getElementById("guess-form").style.display = "flex";
+  document.getElementById("next-btn").classList.add("hidden");
+  document.getElementById("guess-input").value = "";
+  document.getElementById("guess-input").disabled = false;
+  document.getElementById("guess-btn").disabled = false;
+  document.getElementById("checking-msg").textContent = "";
+  document.getElementById("checking-msg").className = "checking-msg";
+  updatePixelBar(MAX_ATTEMPTS);
+
+  const movieData = await fetchMovieData();
+  if (!movieData) {
+    setStatusMsg("Failed to load movie. Try again.", "wrong");
+    return;
+  }
+
+  state.currentMovie = movieData;
+  const imgData = generatePosterCanvas(movieData);
+  state.originalImageData = imgData;
+
+  const canvas = document.getElementById("movie-canvas");
+  drawPixelated(imgData, PIXEL_LEVELS[0]);
+  setLoading(false);
+  canvas.style.display = "block";
+
+  // Allow enter to submit
+  document.getElementById("guess-input").onkeydown = e => {
+    if (e.key === "Enter") submitGuess();
+  };
+}
+
+async function submitGuess() {
+  const input = document.getElementById("guess-input");
+  const guess = input.value.trim();
+  if (!guess || state.gameOver) return;
+
+  // Disable form during check
+  document.getElementById("guess-btn").disabled = true;
+  document.getElementById("guess-input").disabled = true;
+  setStatusMsg("checking...", "");
+
+  const result = await validateGuess(guess, state.currentMovie.title);
+
+  if (result.correct) {
+    // Win!
+    state.gameOver = true;
+    const points = Math.max(1, state.attemptsLeft + 1);
+    state.score += points;
+    document.getElementById("score-display").textContent = state.score;
+
+    showReveal(true, state.currentMovie.title, `+${points} points · ${state.attemptsLeft + 1} attempts remaining`);
+    drawPixelated(state.originalImageData, 1); // full reveal
+    setStatusMsg(`🎉 ${result.feedback}`, "correct");
+    endRound();
+  } else {
+    // Wrong
+    state.wrongGuesses.push(guess);
+    state.attemptsLeft--;
+
+    addWrongChip(guess);
+    setStatusMsg(`✗ ${result.feedback}`, "wrong");
+
+    if (state.attemptsLeft <= 0) {
+      // Lose
+      state.gameOver = true;
+      showReveal(false, state.currentMovie.title, "Better luck next round!");
+      drawPixelated(state.originalImageData, 1);
+      endRound();
+    } else {
+      // Reveal more
+      updatePixelBar(state.attemptsLeft);
+      const wrongCount = MAX_ATTEMPTS - state.attemptsLeft;
+      drawPixelated(state.originalImageData, PIXEL_LEVELS[wrongCount]);
+      revealClue(wrongCount - 1);
+
+      // Re-enable
+      document.getElementById("guess-btn").disabled = false;
+      document.getElementById("guess-input").disabled = false;
+      input.value = "";
+      input.focus();
+    }
+  }
+}
+
+function revealClue(index) {
+  if (!state.currentMovie?.clues?.[index]) return;
+  const clue = state.currentMovie.clues[index];
+  state.clues.push(clue);
+
+  const section = document.getElementById("clues-section");
+  section.style.display = "block";
+  const list = document.getElementById("clues-list");
+  const chip = document.createElement("div");
+  chip.className = "clue-chip";
+  chip.textContent = clue;
+  chip.style.animationDelay = "0ms";
+  list.appendChild(chip);
+}
+
+function addWrongChip(guess) {
+  document.getElementById("wrong-section").style.display = "block";
+  const list = document.getElementById("wrong-list");
+  const chip = document.createElement("div");
+  chip.className = "wrong-chip";
+  chip.textContent = guess;
+  list.appendChild(chip);
+}
+
+function showReveal(won, title, sub) {
+  const overlay = document.getElementById("reveal-overlay");
+  const titleEl = document.getElementById("reveal-title");
+  const subEl = document.getElementById("reveal-sub");
+
+  titleEl.textContent = won ? `🎉 ${title}` : `🎬 ${title}`;
+  titleEl.className = "reveal-title " + (won ? "win" : "lose");
+  subEl.textContent = sub;
+  overlay.classList.add("show");
+}
+
+function endRound() {
+  document.getElementById("guess-form").style.display = "none";
+  document.getElementById("next-btn").classList.remove("hidden");
+}
+
+function nextMovie() {
+  loadNewMovie();
+}
+
+function updatePixelBar(attemptsLeft) {
+  const pct = (attemptsLeft / MAX_ATTEMPTS) * 100;
+  const fill = document.getElementById("pixel-bar-fill");
+  fill.style.width = pct + "%";
+  fill.className = "pixel-bar-fill" + (attemptsLeft <= 2 ? " danger" : "");
+  document.getElementById("attempts-left").textContent = `${attemptsLeft} left`;
+  document.getElementById("pixel-label").textContent = `pixelation`;
+}
+
+function setLoading(on) {
+  document.getElementById("loading-shimmer").style.display = on ? "flex" : "none";
+  if (on) document.getElementById("movie-canvas").style.display = "none";
+}
+
+function setStatusMsg(msg, type) {
+  const el = document.getElementById("checking-msg");
+  el.textContent = msg;
+  el.className = "checking-msg " + (type || "");
+}
+</script>
+
+</body>
+</html>
